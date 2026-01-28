@@ -34,10 +34,10 @@ struct TableChars {
 }
 
 const UNICODE_CHARS: TableChars = TableChars {
-    top_left: "┌",
-    top_right: "┐",
-    bottom_left: "└",
-    bottom_right: "┘",
+    top_left: "╭",
+    top_right: "╮",
+    bottom_left: "╰",
+    bottom_right: "╯",
     horizontal: "─",
     vertical: "│",
     top_tee: "┬",
