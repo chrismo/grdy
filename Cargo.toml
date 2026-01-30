@@ -1,5 +1,5 @@
 [package]
-name = "sqr"
+name = "grdy"
 version = "0.1.0"
 edition = "2024"
 description = "A CLI tool to render JSON data as beautiful tables"
@@ -7,7 +7,7 @@ license = "MIT"
 repository = "https://github.com/chrismo/grd"
 
 [[bin]]
-name = "sqr"
+name = "grdy"
 path = "src/main.rs"
 
 [dependencies]

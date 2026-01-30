@@ -5,7 +5,7 @@ use std::io::{self, Read};
 use unicode_width::UnicodeWidthStr;
 
 #[derive(Parser)]
-#[command(name = "sqr", about = "Render JSON data as beautiful tables")]
+#[command(name = "grdy", about = "Render JSON data as beautiful tables")]
 struct Args {
     /// Input file (reads from stdin if not provided)
     file: Option<String>,

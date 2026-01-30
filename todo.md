@@ -4,7 +4,7 @@ CLI tool to render JSON as tables. Opinionated, minimal flags.
 
 ## Name
 
-Rename from `sqr` to `grdy` (crate + binary).
+~~Rename from `sqr` to `grdy` (crate + binary).~~ Done.
 
 ## Future Features
 
