@@ -31,9 +31,11 @@ fi
 echo "Updating Cargo.toml to version $VERSION..."
 sed -i '' "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
 
-# Commit the version bump
-git add Cargo.toml
-git commit -m "Bump version to $VERSION"
+# Commit the version bump if there are changes
+if ! git diff --quiet Cargo.toml; then
+    git add Cargo.toml
+    git commit -m "Bump version to $VERSION"
+fi
 
 echo "Creating tag $TAG..."
 git tag "$TAG"
