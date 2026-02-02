@@ -1,7 +1,6 @@
 ---
 source: src/main.rs
-assertion_line: 420
-expression: "render_table(&rows, false, true)"
+expression: "render_table(&rows, false, false)"
 ---
 ╭───┬───╮
 │ a │ b │

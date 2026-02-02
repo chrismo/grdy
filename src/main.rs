@@ -7,26 +7,26 @@ use std::path::PathBuf;
 use unicode_width::UnicodeWidthStr;
 
 #[derive(Parser)]
-#[command(name = "grdy", version, about = "Render JSON data as tables")]
+#[command(name = "Griddy", version, about = "Render JSON data as tables")]
 struct Args {
     /// Input file (reads from stdin if not provided)
     file: Option<String>,
 
-    /// Use ASCII characters instead of Unicode box-drawing
+    /// Use ASCII instead of Unicode box-drawing
     #[arg(short, long)]
-    compact: bool,
+    ascii: bool,
 
-    /// Disable styling (bold headers, dim stripes)
+    /// Dim alternate rows for readability
     #[arg(short, long)]
-    plain: bool,
+    stripe: bool,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct Config {
     #[serde(default)]
-    compact: bool,
+    ascii: bool,
     #[serde(default)]
-    plain: bool,
+    stripe: bool,
 }
 
 impl Config {
@@ -89,8 +89,8 @@ fn main() {
     let config = Config::load();
 
     // CLI flags override config
-    let compact = args.compact || config.compact;
-    let plain = args.plain || config.plain;
+    let ascii = args.ascii || config.ascii;
+    let stripe = args.stripe || config.stripe;
 
     let input = match &args.file {
         Some(path) => std::fs::read_to_string(path).expect("Failed to read file"),
@@ -102,7 +102,7 @@ fn main() {
     };
 
     let rows = parse_json(&input);
-    let output = render_table(&rows, compact, plain);
+    let output = render_table(&rows, ascii, stripe);
     print!("{}", output);
 }
 
@@ -141,7 +141,7 @@ fn parse_json(input: &str) -> Vec<Value> {
     rows
 }
 
-fn render_table(rows: &[Value], compact: bool, plain: bool) -> String {
+fn render_table(rows: &[Value], ascii: bool, stripe: bool) -> String {
     if rows.is_empty() {
         return String::new();
     }
@@ -188,14 +188,14 @@ fn render_table(rows: &[Value], compact: bool, plain: bool) -> String {
         }
     }
 
-    let chars = if compact { &ASCII_CHARS } else { &UNICODE_CHARS };
+    let chars = if ascii { &ASCII_CHARS } else { &UNICODE_CHARS };
 
     let mut output = String::new();
     output.push_str(&render_top_border(&widths, chars));
-    output.push_str(&render_row(&columns, &widths, chars, plain, None));
+    output.push_str(&render_row(&columns, &widths, chars, stripe, None));
     output.push_str(&render_separator(&widths, chars));
     for (i, row) in table_data.iter().enumerate() {
-        output.push_str(&render_row(row, &widths, chars, plain, Some(i)));
+        output.push_str(&render_row(row, &widths, chars, stripe, Some(i)));
     }
     output.push_str(&render_bottom_border(&widths, chars));
     output
@@ -254,9 +254,9 @@ fn render_separator(widths: &[usize], chars: &TableChars) -> String {
     s
 }
 
-fn render_row(cells: &[String], widths: &[usize], chars: &TableChars, plain: bool, row_index: Option<usize>) -> String {
+fn render_row(cells: &[String], widths: &[usize], chars: &TableChars, stripe: bool, row_index: Option<usize>) -> String {
     let is_header = row_index.is_none();
-    let dim = !plain && row_index.is_some_and(|i| i % 2 == 1);
+    let dim = stripe && row_index.is_some_and(|i| i % 2 == 1);
 
     let mut s = String::new();
 
@@ -269,11 +269,8 @@ fn render_row(cells: &[String], widths: &[usize], chars: &TableChars, plain: boo
         let cell_width = UnicodeWidthStr::width(cell.as_str());
         let padding = widths[i] - cell_width;
 
-        if is_header && !plain {
+        if is_header && stripe {
             s.push_str(&format!(" \x1b[1m{}\x1b[0m{} ", cell, " ".repeat(padding)));
-            if dim {
-                s.push_str("\x1b[2m");
-            }
         } else {
             s.push_str(&format!(" {}{} ", cell, " ".repeat(padding)));
         }
@@ -374,40 +371,40 @@ mod tests {
         #[test]
         fn empty_input() {
             let rows: Vec<Value> = vec![];
-            assert_eq!(render_table(&rows, false, true), "");
+            assert_eq!(render_table(&rows, false, false), "");
         }
 
         #[test]
-        fn single_row_plain() {
+        fn single_row() {
             let rows: Vec<Value> = vec![serde_json::json!({"name": "Alice", "age": 30})];
-            assert_snapshot!(render_table(&rows, false, true));
+            assert_snapshot!(render_table(&rows, false, false));
         }
 
         #[test]
-        fn single_row_compact() {
+        fn single_row_ascii() {
             let rows: Vec<Value> = vec![serde_json::json!({"name": "Alice", "age": 30})];
-            assert_snapshot!(render_table(&rows, true, true));
+            assert_snapshot!(render_table(&rows, true, false));
         }
 
         #[test]
-        fn multiple_rows_plain() {
+        fn multiple_rows() {
             let rows: Vec<Value> = vec![
                 serde_json::json!({"name": "Alice", "age": 30}),
                 serde_json::json!({"name": "Bob", "age": 25}),
                 serde_json::json!({"name": "Charlie", "age": 35}),
             ];
-            assert_snapshot!(render_table(&rows, false, true));
+            assert_snapshot!(render_table(&rows, false, false));
         }
 
         #[test]
-        fn multiple_rows_with_styling() {
+        fn multiple_rows_with_stripe() {
             let rows: Vec<Value> = vec![
                 serde_json::json!({"name": "Alice", "age": 30}),
                 serde_json::json!({"name": "Bob", "age": 25}),
                 serde_json::json!({"name": "Charlie", "age": 35}),
                 serde_json::json!({"name": "Diana", "age": 28}),
             ];
-            assert_snapshot!(render_table(&rows, false, false));
+            assert_snapshot!(render_table(&rows, false, true));
         }
 
         #[test]
@@ -417,7 +414,7 @@ mod tests {
                 serde_json::json!({"b": 2}),
                 serde_json::json!({"a": 3, "b": 4}),
             ];
-            assert_snapshot!(render_table(&rows, false, true));
+            assert_snapshot!(render_table(&rows, false, false));
         }
 
         #[test]
@@ -425,7 +422,7 @@ mod tests {
             let rows: Vec<Value> = vec![
                 serde_json::json!({"data": [1, 2, 3], "meta": {"x": 1}}),
             ];
-            assert_snapshot!(render_table(&rows, false, true));
+            assert_snapshot!(render_table(&rows, false, false));
         }
     }
 }

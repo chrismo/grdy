@@ -1,6 +1,8 @@
-# grdy
+# Griddy
 
 A CLI tool to render JSON data as tables.
+
+Binary name: `grdy`
 
 ## Installation
 
@@ -26,8 +28,8 @@ grdy data.json
 
 ### Options
 
-- `-c, --compact` - Use ASCII characters instead of Unicode box-drawing
-- `-p, --plain` - Disable styling (bold headers, dim stripes)
+- `-a, --ascii` - Use ASCII instead of Unicode box-drawing
+- `-s, --stripe` - Dim alternate rows for readability
 
 ### Input formats
 
@@ -41,8 +43,8 @@ Create `~/.config/grdy/config.json` to set defaults:
 
 ```json
 {
-  "compact": false,
-  "plain": false
+  "ascii": false,
+  "stripe": false
 }
 ```
 

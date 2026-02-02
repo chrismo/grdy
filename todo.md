@@ -1,6 +1,8 @@
-# grdy
+# Griddy
 
 CLI tool to render JSON as tables. Opinionated, minimal flags.
+
+Binary name: `grdy`
 
 ## Future Features
 

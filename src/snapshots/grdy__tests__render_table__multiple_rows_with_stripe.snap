@@ -1,7 +1,6 @@
 ---
 source: src/main.rs
-assertion_line: 410
-expression: "render_table(&rows, false, false)"
+expression: "render_table(&rows, false, true)"
 ---
 ╭─────┬─────────╮
 │ [1mage[0m │ [1mname[0m    │

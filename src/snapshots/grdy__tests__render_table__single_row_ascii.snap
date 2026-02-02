@@ -1,7 +1,6 @@
 ---
 source: src/main.rs
-assertion_line: 389
-expression: "render_table(&rows, true, true)"
+expression: "render_table(&rows, true, false)"
 ---
 +-----+-------+
 | age | name  |

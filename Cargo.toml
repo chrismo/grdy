@@ -2,7 +2,7 @@
 name = "grdy"
 version = "0.2.0"
 edition = "2024"
-description = "A CLI tool to render JSON data as beautiful tables"
+description = "Griddy - a CLI tool to render JSON data as tables"
 license = "BSD-3-Clause"
 repository = "https://github.com/chrismo/grdy"
 
