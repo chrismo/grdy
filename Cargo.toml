@@ -1,0 +1,17 @@
+[package]
+name = "grdy"
+version = "0.1.0"
+edition = "2024"
+description = "A CLI tool to render JSON data as beautiful tables"
+license = "MIT"
+repository = "https://github.com/chrismo/grd"
+
+[[bin]]
+name = "grdy"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+unicode-width = "0.2"
