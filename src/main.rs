@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use unicode_width::UnicodeWidthStr;
 
 #[derive(Parser)]
-#[command(name = "grdy", about = "Render JSON data as beautiful tables")]
+#[command(name = "grdy", version, about = "Render JSON data as tables")]
 struct Args {
     /// Input file (reads from stdin if not provided)
     file: Option<String>,
