@@ -1,0 +1,10 @@
+---
+source: src/main.rs
+assertion_line: 383
+expression: "render_table(&rows, false, true)"
+---
+╭─────┬───────╮
+│ age │ name  │
+├─────┼───────┤
+│ 30  │ Alice │
+╰─────┴───────╯

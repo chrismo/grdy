@@ -27,7 +27,26 @@ grdy data.json
 ### Options
 
 - `-c, --compact` - Use ASCII characters instead of Unicode box-drawing
-- `-n, --no-color` - Disable colored output
+- `-p, --plain` - Disable styling (bold headers, dim stripes)
+
+### Input formats
+
+- JSON array of objects
+- Single JSON object
+- JSONL (newline-delimited JSON)
+
+### Configuration
+
+Create `~/.config/grdy/config.json` to set defaults:
+
+```json
+{
+  "compact": false,
+  "plain": false
+}
+```
+
+CLI flags override config file settings.
 
 ## License
 

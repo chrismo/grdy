@@ -1,7 +1,9 @@
 use clap::Parser;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::io::{self, Read};
+use std::path::PathBuf;
 use unicode_width::UnicodeWidthStr;
 
 #[derive(Parser)]
@@ -14,9 +16,30 @@ struct Args {
     #[arg(short, long)]
     compact: bool,
 
-    /// Disable colored output
+    /// Disable styling (bold headers, dim stripes)
     #[arg(short, long)]
-    no_color: bool,
+    plain: bool,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct Config {
+    #[serde(default)]
+    compact: bool,
+    #[serde(default)]
+    plain: bool,
+}
+
+impl Config {
+    fn load() -> Self {
+        Self::config_path()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    }
+
+    fn config_path() -> Option<PathBuf> {
+        dirs::config_dir().map(|d| d.join("grdy").join("config.json"))
+    }
 }
 
 struct TableChars {
@@ -63,6 +86,11 @@ const ASCII_CHARS: TableChars = TableChars {
 
 fn main() {
     let args = Args::parse();
+    let config = Config::load();
+
+    // CLI flags override config
+    let compact = args.compact || config.compact;
+    let plain = args.plain || config.plain;
 
     let input = match &args.file {
         Some(path) => std::fs::read_to_string(path).expect("Failed to read file"),
@@ -73,24 +101,54 @@ fn main() {
         }
     };
 
-    let value: Value = serde_json::from_str(&input).expect("Invalid JSON");
+    let rows = parse_json(&input);
+    let output = render_table(&rows, compact, plain);
+    print!("{}", output);
+}
 
-    let rows = match value {
-        Value::Array(arr) => arr,
-        obj @ Value::Object(_) => vec![obj],
-        _ => {
-            eprintln!("Expected JSON array or object");
-            std::process::exit(1);
+fn parse_json(input: &str) -> Vec<Value> {
+    // Try parsing as a single JSON value first
+    if let Ok(value) = serde_json::from_str::<Value>(input) {
+        return match value {
+            Value::Array(arr) => arr,
+            obj @ Value::Object(_) => vec![obj],
+            _ => {
+                eprintln!("Expected JSON array or object");
+                std::process::exit(1);
+            }
+        };
+    }
+
+    // Try parsing as JSONL (newline-delimited JSON)
+    let mut rows = Vec::new();
+    for line in input.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
         }
-    };
+        match serde_json::from_str::<Value>(line) {
+            Ok(obj @ Value::Object(_)) => rows.push(obj),
+            Ok(_) => {
+                eprintln!("Expected JSON objects in JSONL input");
+                std::process::exit(1);
+            }
+            Err(e) => {
+                eprintln!("Invalid JSON: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+    rows
+}
 
+fn render_table(rows: &[Value], compact: bool, plain: bool) -> String {
     if rows.is_empty() {
-        return;
+        return String::new();
     }
 
     // Extract columns from all objects (use BTreeMap for consistent ordering)
     let mut all_keys: BTreeMap<String, usize> = BTreeMap::new();
-    for row in &rows {
+    for row in rows {
         if let Value::Object(obj) = row {
             for key in obj.keys() {
                 let len = all_keys.len();
@@ -106,12 +164,12 @@ fn main() {
     };
 
     if columns.is_empty() {
-        return;
+        return String::new();
     }
 
     // Build table data
     let mut table_data: Vec<Vec<String>> = Vec::new();
-    for row in &rows {
+    for row in rows {
         let mut row_data = Vec::new();
         if let Value::Object(obj) = row {
             for col in &columns {
@@ -130,16 +188,17 @@ fn main() {
         }
     }
 
-    let chars = if args.compact { &ASCII_CHARS } else { &UNICODE_CHARS };
+    let chars = if compact { &ASCII_CHARS } else { &UNICODE_CHARS };
 
-    // Print table
-    print_top_border(&widths, chars);
-    print_row(&columns, &widths, chars, args.no_color, true);
-    print_separator(&widths, chars);
-    for row in &table_data {
-        print_row(row, &widths, chars, args.no_color, false);
+    let mut output = String::new();
+    output.push_str(&render_top_border(&widths, chars));
+    output.push_str(&render_row(&columns, &widths, chars, plain, None));
+    output.push_str(&render_separator(&widths, chars));
+    for (i, row) in table_data.iter().enumerate() {
+        output.push_str(&render_row(row, &widths, chars, plain, Some(i)));
     }
-    print_bottom_border(&widths, chars);
+    output.push_str(&render_bottom_border(&widths, chars));
+    output
 }
 
 fn format_value(v: &Value) -> String {
@@ -153,51 +212,220 @@ fn format_value(v: &Value) -> String {
     }
 }
 
-fn print_top_border(widths: &[usize], chars: &TableChars) {
-    print!("{}", chars.top_left);
+fn render_top_border(widths: &[usize], chars: &TableChars) -> String {
+    let mut s = String::new();
+    s.push_str(chars.top_left);
     for (i, w) in widths.iter().enumerate() {
-        print!("{}", chars.horizontal.repeat(*w + 2));
+        s.push_str(&chars.horizontal.repeat(*w + 2));
         if i < widths.len() - 1 {
-            print!("{}", chars.top_tee);
+            s.push_str(chars.top_tee);
         }
     }
-    println!("{}", chars.top_right);
+    s.push_str(chars.top_right);
+    s.push('\n');
+    s
 }
 
-fn print_bottom_border(widths: &[usize], chars: &TableChars) {
-    print!("{}", chars.bottom_left);
+fn render_bottom_border(widths: &[usize], chars: &TableChars) -> String {
+    let mut s = String::new();
+    s.push_str(chars.bottom_left);
     for (i, w) in widths.iter().enumerate() {
-        print!("{}", chars.horizontal.repeat(*w + 2));
+        s.push_str(&chars.horizontal.repeat(*w + 2));
         if i < widths.len() - 1 {
-            print!("{}", chars.bottom_tee);
+            s.push_str(chars.bottom_tee);
         }
     }
-    println!("{}", chars.bottom_right);
+    s.push_str(chars.bottom_right);
+    s.push('\n');
+    s
 }
 
-fn print_separator(widths: &[usize], chars: &TableChars) {
-    print!("{}", chars.left_tee);
+fn render_separator(widths: &[usize], chars: &TableChars) -> String {
+    let mut s = String::new();
+    s.push_str(chars.left_tee);
     for (i, w) in widths.iter().enumerate() {
-        print!("{}", chars.horizontal.repeat(*w + 2));
+        s.push_str(&chars.horizontal.repeat(*w + 2));
         if i < widths.len() - 1 {
-            print!("{}", chars.cross);
+            s.push_str(chars.cross);
         }
     }
-    println!("{}", chars.right_tee);
+    s.push_str(chars.right_tee);
+    s.push('\n');
+    s
 }
 
-fn print_row(cells: &[String], widths: &[usize], chars: &TableChars, no_color: bool, is_header: bool) {
-    print!("{}", chars.vertical);
+fn render_row(cells: &[String], widths: &[usize], chars: &TableChars, plain: bool, row_index: Option<usize>) -> String {
+    let is_header = row_index.is_none();
+    let dim = !plain && row_index.is_some_and(|i| i % 2 == 1);
+
+    let mut s = String::new();
+
+    if dim {
+        s.push_str("\x1b[2m");
+    }
+
+    s.push_str(chars.vertical);
     for (i, cell) in cells.iter().enumerate() {
         let cell_width = UnicodeWidthStr::width(cell.as_str());
         let padding = widths[i] - cell_width;
 
-        if is_header && !no_color {
-            print!(" \x1b[1m{}\x1b[0m{} ", cell, " ".repeat(padding));
+        if is_header && !plain {
+            s.push_str(&format!(" \x1b[1m{}\x1b[0m{} ", cell, " ".repeat(padding)));
+            if dim {
+                s.push_str("\x1b[2m");
+            }
         } else {
-            print!(" {}{} ", cell, " ".repeat(padding));
+            s.push_str(&format!(" {}{} ", cell, " ".repeat(padding)));
         }
-        print!("{}", chars.vertical);
+        s.push_str(chars.vertical);
     }
-    println!();
+
+    if dim {
+        s.push_str("\x1b[0m");
+    }
+    s.push('\n');
+    s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod parse_json {
+        use super::*;
+
+        #[test]
+        fn array_of_objects() {
+            let input = r#"[{"a": 1}, {"a": 2}]"#;
+            let rows = parse_json(input);
+            assert_eq!(rows.len(), 2);
+        }
+
+        #[test]
+        fn single_object() {
+            let input = r#"{"a": 1, "b": 2}"#;
+            let rows = parse_json(input);
+            assert_eq!(rows.len(), 1);
+        }
+
+        #[test]
+        fn jsonl() {
+            let input = "{\"a\": 1}\n{\"a\": 2}\n{\"a\": 3}";
+            let rows = parse_json(input);
+            assert_eq!(rows.len(), 3);
+        }
+
+        #[test]
+        fn jsonl_with_blank_lines() {
+            let input = "{\"a\": 1}\n\n{\"a\": 2}\n";
+            let rows = parse_json(input);
+            assert_eq!(rows.len(), 2);
+        }
+    }
+
+    mod format_value {
+        use super::*;
+
+        #[test]
+        fn null() {
+            assert_eq!(format_value(&Value::Null), "null");
+        }
+
+        #[test]
+        fn bool_true() {
+            assert_eq!(format_value(&Value::Bool(true)), "true");
+        }
+
+        #[test]
+        fn bool_false() {
+            assert_eq!(format_value(&Value::Bool(false)), "false");
+        }
+
+        #[test]
+        fn number_int() {
+            assert_eq!(format_value(&serde_json::json!(42)), "42");
+        }
+
+        #[test]
+        fn number_float() {
+            assert_eq!(format_value(&serde_json::json!(3.14)), "3.14");
+        }
+
+        #[test]
+        fn string() {
+            assert_eq!(format_value(&serde_json::json!("hello")), "hello");
+        }
+
+        #[test]
+        fn array() {
+            assert_eq!(format_value(&serde_json::json!([1, 2, 3])), "[3 items]");
+        }
+
+        #[test]
+        fn object() {
+            assert_eq!(format_value(&serde_json::json!({"a": 1, "b": 2})), "{2 keys}");
+        }
+    }
+
+    mod render_table {
+        use super::*;
+        use insta::assert_snapshot;
+
+        #[test]
+        fn empty_input() {
+            let rows: Vec<Value> = vec![];
+            assert_eq!(render_table(&rows, false, true), "");
+        }
+
+        #[test]
+        fn single_row_plain() {
+            let rows: Vec<Value> = vec![serde_json::json!({"name": "Alice", "age": 30})];
+            assert_snapshot!(render_table(&rows, false, true));
+        }
+
+        #[test]
+        fn single_row_compact() {
+            let rows: Vec<Value> = vec![serde_json::json!({"name": "Alice", "age": 30})];
+            assert_snapshot!(render_table(&rows, true, true));
+        }
+
+        #[test]
+        fn multiple_rows_plain() {
+            let rows: Vec<Value> = vec![
+                serde_json::json!({"name": "Alice", "age": 30}),
+                serde_json::json!({"name": "Bob", "age": 25}),
+                serde_json::json!({"name": "Charlie", "age": 35}),
+            ];
+            assert_snapshot!(render_table(&rows, false, true));
+        }
+
+        #[test]
+        fn multiple_rows_with_styling() {
+            let rows: Vec<Value> = vec![
+                serde_json::json!({"name": "Alice", "age": 30}),
+                serde_json::json!({"name": "Bob", "age": 25}),
+                serde_json::json!({"name": "Charlie", "age": 35}),
+                serde_json::json!({"name": "Diana", "age": 28}),
+            ];
+            assert_snapshot!(render_table(&rows, false, false));
+        }
+
+        #[test]
+        fn sparse_data() {
+            let rows: Vec<Value> = vec![
+                serde_json::json!({"a": 1}),
+                serde_json::json!({"b": 2}),
+                serde_json::json!({"a": 3, "b": 4}),
+            ];
+            assert_snapshot!(render_table(&rows, false, true));
+        }
+
+        #[test]
+        fn nested_values() {
+            let rows: Vec<Value> = vec![
+                serde_json::json!({"data": [1, 2, 3], "meta": {"x": 1}}),
+            ];
+            assert_snapshot!(render_table(&rows, false, true));
+        }
+    }
 }

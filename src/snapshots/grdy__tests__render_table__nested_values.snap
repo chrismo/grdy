@@ -1,0 +1,10 @@
+---
+source: src/main.rs
+assertion_line: 428
+expression: "render_table(&rows, false, true)"
+---
+╭───────────┬──────────╮
+│ data      │ meta     │
+├───────────┼──────────┤
+│ [3 items] │ {1 keys} │
+╰───────────┴──────────╯
