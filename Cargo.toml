@@ -3,8 +3,8 @@ name = "grdy"
 version = "0.1.0"
 edition = "2024"
 description = "A CLI tool to render JSON data as beautiful tables"
-license = "MIT"
-repository = "https://github.com/chrismo/grd"
+license = "BSD-3-Clause"
+repository = "https://github.com/chrismo/grdy"
 
 [[bin]]
 name = "grdy"

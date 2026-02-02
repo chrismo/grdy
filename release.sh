@@ -27,10 +27,19 @@ if ! git diff-index --quiet HEAD --; then
     exit 1
 fi
 
+# Update version in Cargo.toml
+echo "Updating Cargo.toml to version $VERSION..."
+sed -i '' "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
+
+# Commit the version bump
+git add Cargo.toml
+git commit -m "Bump version to $VERSION"
+
 echo "Creating tag $TAG..."
 git tag "$TAG"
 
-echo "Pushing tag..."
+echo "Pushing commit and tag..."
+git push origin "$BRANCH"
 git push origin "$TAG"
 
 echo "Released $TAG"
