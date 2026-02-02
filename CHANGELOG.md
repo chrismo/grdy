@@ -1,6 +1,6 @@
 # Griddy Changelog
 
-## [NEXT]
+## [0.3.0] - 2026-02-02
 
 ### Added
 - "Griddy" branding (binary remains `grdy`)
