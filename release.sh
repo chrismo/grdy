@@ -27,6 +27,23 @@ if ! git diff-index --quiet HEAD --; then
     exit 1
 fi
 
+# Check changelog
+if ! grep -q "\[$VERSION\]" CHANGELOG.md; then
+    echo "Warning: CHANGELOG.md has no entry for $VERSION" >&2
+    read -p "Continue anyway? [y/N] " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        exit 1
+    fi
+fi
+
+read -p "Is the changelog up to date? [y/N] " -n 1 -r
+echo
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "Update CHANGELOG.md and try again." >&2
+    exit 1
+fi
+
 # Update version in Cargo.toml and README.md
 echo "Updating Cargo.toml to version $VERSION..."
 sed -i '' "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
