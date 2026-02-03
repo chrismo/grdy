@@ -2,8 +2,8 @@
 source: src/main.rs
 expression: "render_table(&rows, true, false)"
 ---
-+-----+-------+
-| age | name  |
-+-----+-------+
-| 30  | Alice |
-+-----+-------+
++-------+-----+
+| name  | age |
++-------+-----+
+| Alice | 30  |
++-------+-----+

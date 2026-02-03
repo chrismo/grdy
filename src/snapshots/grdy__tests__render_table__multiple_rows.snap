@@ -2,10 +2,10 @@
 source: src/main.rs
 expression: "render_table(&rows, false, false)"
 ---
-╭─────┬─────────╮
-│ age │ name    │
-├─────┼─────────┤
-│ 30  │ Alice   │
-│ 25  │ Bob     │
-│ 35  │ Charlie │
-╰─────┴─────────╯
+╭─────────┬─────╮
+│ name    │ age │
+├─────────┼─────┤
+│ Alice   │ 30  │
+│ Bob     │ 25  │
+│ Charlie │ 35  │
+╰─────────┴─────╯

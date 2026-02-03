@@ -1,7 +1,7 @@
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::HashSet;
 use std::io::{self, Read};
 use std::path::PathBuf;
 use unicode_width::UnicodeWidthStr;
@@ -146,22 +146,18 @@ fn render_table(rows: &[Value], ascii: bool, stripe: bool) -> String {
         return String::new();
     }
 
-    // Extract columns from all objects (use BTreeMap for consistent ordering)
-    let mut all_keys: BTreeMap<String, usize> = BTreeMap::new();
+    // Extract columns from all objects, preserving insertion order
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut columns: Vec<String> = Vec::new();
     for row in rows {
         if let Value::Object(obj) = row {
             for key in obj.keys() {
-                let len = all_keys.len();
-                all_keys.entry(key.clone()).or_insert(len);
+                if seen.insert(key.clone()) {
+                    columns.push(key.clone());
+                }
             }
         }
     }
-
-    let columns: Vec<String> = {
-        let mut cols: Vec<(String, usize)> = all_keys.into_iter().collect();
-        cols.sort_by_key(|(_, idx)| *idx);
-        cols.into_iter().map(|(k, _)| k).collect()
-    };
 
     if columns.is_empty() {
         return String::new();
@@ -415,6 +411,16 @@ mod tests {
                 serde_json::json!({"a": 3, "b": 4}),
             ];
             assert_snapshot!(render_table(&rows, false, false));
+        }
+
+        #[test]
+        fn preserves_key_order() {
+            // Keys are in non-alphabetical order in the JSON; columns should match input order
+            let rows = parse_json(r#"[{"zebra": 1, "apple": 2, "mango": 3}]"#);
+            let output = render_table(&rows, true, false);
+            let header_line = output.lines().nth(1).unwrap();
+            let headers: Vec<&str> = header_line.split('|').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+            assert_eq!(headers, vec!["zebra", "apple", "mango"]);
         }
 
         #[test]
