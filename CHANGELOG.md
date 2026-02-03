@@ -1,5 +1,10 @@
 # Griddy Changelog
 
+## [0.4.0] - 2026-02-03
+
+### Fixed
+- Columns now preserve JSON key order instead of being alphabetically sorted
+
 ## [0.3.0] - 2026-02-02
 
 ### Added
