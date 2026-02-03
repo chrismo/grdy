@@ -27,13 +27,16 @@ if ! git diff-index --quiet HEAD --; then
     exit 1
 fi
 
-# Update version in Cargo.toml
+# Update version in Cargo.toml and README.md
 echo "Updating Cargo.toml to version $VERSION..."
 sed -i '' "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
 
+echo "Updating README.md install example..."
+sed -i '' "s/bash -s v[0-9]*\.[0-9]*\.[0-9]*/bash -s v$VERSION/" README.md
+
 # Commit the version bump if there are changes
-if ! git diff --quiet Cargo.toml; then
-    git add Cargo.toml
+if ! git diff --quiet Cargo.toml README.md; then
+    git add Cargo.toml README.md
     git commit -m "Bump version to $VERSION"
 fi
 
