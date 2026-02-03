@@ -4,6 +4,10 @@ CLI tool to render JSON as tables. Opinionated, minimal flags.
 
 Binary name: `grdy`
 
+## Rename?
+
+Consider renaming to **jaat** - "JSON as a Table". More descriptive, easier to type than `grdy`.
+
 ## Distribution
 
 - Homebrew tap/formula
