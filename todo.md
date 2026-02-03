@@ -4,6 +4,10 @@ CLI tool to render JSON as tables. Opinionated, minimal flags.
 
 Binary name: `grdy`
 
+## Distribution
+
+- Homebrew tap/formula
+
 ## Future Features
 
 - Right-align numbers

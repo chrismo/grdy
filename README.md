@@ -10,6 +10,11 @@ Binary name: `grdy`
 curl -fsSL https://raw.githubusercontent.com/chrismo/grdy/main/install.sh | bash
 ```
 
+This installs to `~/.local/bin`. Make sure it's in your PATH:
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
 To install a specific version:
 
 ```bash
