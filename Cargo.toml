@@ -1,6 +1,6 @@
 [package]
 name = "grdy"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 description = "Griddy - a CLI tool to render JSON data as tables"
 license = "BSD-3-Clause"
