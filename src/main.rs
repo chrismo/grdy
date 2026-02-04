@@ -2,6 +2,7 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
+use std::env;
 use std::io::{self, Read};
 use std::path::PathBuf;
 use unicode_width::UnicodeWidthStr;
@@ -38,7 +39,27 @@ impl Config {
     }
 
     fn config_path() -> Option<PathBuf> {
-        dirs::config_dir().map(|d| d.join("grdy").join("config.json"))
+        // Check XDG_CONFIG_HOME first, then fall back to dirs::config_dir()
+        let xdg = env::var("XDG_CONFIG_HOME").ok().map(PathBuf::from);
+        let base = xdg.or_else(|| dirs::home_dir().map(|h| h.join(".config")));
+        let xdg_path = base.map(|d| d.join("grdy").join("config.json"));
+
+        if let Some(ref p) = xdg_path {
+            if p.exists() {
+                return xdg_path;
+            }
+        }
+
+        // Fall back to platform default (e.g. ~/Library/Application Support on macOS)
+        let platform_path = dirs::config_dir().map(|d| d.join("grdy").join("config.json"));
+        if let Some(ref p) = platform_path {
+            if p.exists() {
+                return platform_path;
+            }
+        }
+
+        // Return XDG path as the preferred default even if nothing exists yet
+        xdg_path
     }
 }
 
@@ -429,6 +450,49 @@ mod tests {
                 serde_json::json!({"data": [1, 2, 3], "meta": {"x": 1}}),
             ];
             assert_snapshot!(render_table(&rows, false, false));
+        }
+    }
+
+    mod config {
+        use super::*;
+        use std::fs;
+
+        #[test]
+        fn loads_from_xdg_config_home() {
+            let tmp = tempfile::tempdir().unwrap();
+            let config_dir = tmp.path().join("grdy");
+            fs::create_dir_all(&config_dir).unwrap();
+            let config_file = config_dir.join("config.json");
+            fs::write(&config_file, r#"{"ascii": true, "stripe": true}"#).unwrap();
+
+            // SAFETY: test is single-threaded; no other threads reading this env var
+            unsafe { env::set_var("XDG_CONFIG_HOME", tmp.path()) };
+            let path = Config::config_path().unwrap();
+            assert_eq!(path, config_file);
+
+            let config: Config =
+                serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+            assert!(config.ascii);
+            assert!(config.stripe);
+            unsafe { env::remove_var("XDG_CONFIG_HOME") };
+        }
+
+        #[test]
+        fn missing_file_returns_defaults() {
+            let tmp = tempfile::tempdir().unwrap();
+            // Point XDG at an empty dir with no config file
+            unsafe { env::set_var("XDG_CONFIG_HOME", tmp.path()) };
+            let config = Config::load();
+            assert!(!config.ascii);
+            assert!(!config.stripe);
+            unsafe { env::remove_var("XDG_CONFIG_HOME") };
+        }
+
+        #[test]
+        fn partial_config() {
+            let config: Config = serde_json::from_str(r#"{"ascii": true}"#).unwrap();
+            assert!(config.ascii);
+            assert!(!config.stripe);
         }
     }
 }

@@ -1,5 +1,10 @@
 # Griddy Changelog
 
+## [NEXT]
+
+### Fixed
+- Config file now found via `$XDG_CONFIG_HOME` / `~/.config` on all platforms
+
 ## [0.4.0] - 2026-02-03
 
 ### Fixed
