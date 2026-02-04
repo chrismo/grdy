@@ -84,7 +84,7 @@ Nested arrays display as `[N items]` and nested objects as `{N keys}`.
 
 ### Configuration
 
-Create `~/.config/grdy/config.json` to set defaults:
+Create `~/.config/grdy/config.json` (or `$XDG_CONFIG_HOME/grdy/config.json`) to set defaults:
 
 ```json
 {
