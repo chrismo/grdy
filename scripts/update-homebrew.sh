@@ -2,15 +2,16 @@
 set -euo pipefail
 
 REPO="chrismo/grdy"
-FORMULA="homebrew/Formula/grdy.rb"
 
 # Resolve script location so it works from any directory
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-FORMULA_PATH="$REPO_ROOT/$FORMULA"
+TAP_ROOT="$REPO_ROOT/../homebrew-grdy"
+FORMULA_PATH="$TAP_ROOT/Formula/grdy.rb"
 
-if [ ! -f "$FORMULA_PATH" ]; then
-    echo "Error: formula not found at $FORMULA_PATH" >&2
+if [ ! -d "$TAP_ROOT" ]; then
+    echo "Error: tap repo not found at $TAP_ROOT" >&2
+    echo "Clone it with: git clone git@github.com:chrismo/homebrew-grdy.git $TAP_ROOT" >&2
     exit 1
 fi
 
@@ -50,6 +51,7 @@ echo "x86_64 SHA256:  $SHA_X86"
 echo "aarch64 SHA256: $SHA_ARM"
 
 # Rewrite the formula
+mkdir -p "$TAP_ROOT/Formula"
 cat > "$FORMULA_PATH" <<EOF
 class Grdy < Formula
   desc "CLI tool to render JSON data as tables"
@@ -77,4 +79,4 @@ class Grdy < Formula
 end
 EOF
 
-echo "Updated $FORMULA to version $VERSION"
+echo "Updated $FORMULA_PATH to version $VERSION"
