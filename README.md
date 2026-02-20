@@ -6,6 +6,14 @@ Binary name: `grdy`
 
 ## Installation
 
+### Homebrew (macOS)
+
+```bash
+brew install chrismo/grdy/grdy
+```
+
+### Shell installer
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/chrismo/grdy/main/install.sh | bash
 ```
