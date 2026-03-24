@@ -5,8 +5,8 @@ expression: "render_table(&rows, false, true)"
 ╭─────────┬─────╮
 │ [1mname[0m    │ [1mage[0m │
 ├─────────┼─────┤
-│ Alice   │ 30  │
-[2m│ Bob     │ 25  │[0m
-│ Charlie │ 35  │
-[2m│ Diana   │ 28  │[0m
+│ Alice   │  30 │
+[2m│ Bob     │  25 │[0m
+│ Charlie │  35 │
+[2m│ Diana   │  28 │[0m
 ╰─────────┴─────╯

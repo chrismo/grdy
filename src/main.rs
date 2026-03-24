@@ -197,6 +197,20 @@ fn render_table(rows: &[Value], ascii: bool, stripe: bool) -> String {
         table_data.push(row_data);
     }
 
+    // Detect which columns are numeric (all non-null, non-missing values are numbers)
+    let mut numeric: Vec<bool> = vec![true; columns.len()];
+    for row in rows {
+        if let Value::Object(obj) = row {
+            for (i, col) in columns.iter().enumerate() {
+                if let Some(v) = obj.get(col) {
+                    if !v.is_number() && !v.is_null() {
+                        numeric[i] = false;
+                    }
+                }
+            }
+        }
+    }
+
     // Calculate column widths
     let mut widths: Vec<usize> = columns.iter().map(|c| UnicodeWidthStr::width(c.as_str())).collect();
     for row in &table_data {
@@ -209,10 +223,10 @@ fn render_table(rows: &[Value], ascii: bool, stripe: bool) -> String {
 
     let mut output = String::new();
     output.push_str(&render_top_border(&widths, chars));
-    output.push_str(&render_row(&columns, &widths, chars, stripe, None));
+    output.push_str(&render_row(&columns, &widths, &numeric, chars, stripe, None));
     output.push_str(&render_separator(&widths, chars));
     for (i, row) in table_data.iter().enumerate() {
-        output.push_str(&render_row(row, &widths, chars, stripe, Some(i)));
+        output.push_str(&render_row(row, &widths, &numeric, chars, stripe, Some(i)));
     }
     output.push_str(&render_bottom_border(&widths, chars));
     output
@@ -271,7 +285,7 @@ fn render_separator(widths: &[usize], chars: &TableChars) -> String {
     s
 }
 
-fn render_row(cells: &[String], widths: &[usize], chars: &TableChars, stripe: bool, row_index: Option<usize>) -> String {
+fn render_row(cells: &[String], widths: &[usize], numeric: &[bool], chars: &TableChars, stripe: bool, row_index: Option<usize>) -> String {
     let is_header = row_index.is_none();
     let dim = stripe && row_index.is_some_and(|i| i % 2 == 1);
 
@@ -285,9 +299,12 @@ fn render_row(cells: &[String], widths: &[usize], chars: &TableChars, stripe: bo
     for (i, cell) in cells.iter().enumerate() {
         let cell_width = UnicodeWidthStr::width(cell.as_str());
         let padding = widths[i] - cell_width;
+        let right_align = numeric[i] && !is_header;
 
         if is_header && stripe {
             s.push_str(&format!(" \x1b[1m{}\x1b[0m{} ", cell, " ".repeat(padding)));
+        } else if right_align {
+            s.push_str(&format!(" {}{} ", " ".repeat(padding), cell));
         } else {
             s.push_str(&format!(" {}{} ", cell, " ".repeat(padding)));
         }

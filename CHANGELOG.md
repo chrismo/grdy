@@ -1,6 +1,9 @@
 # Griddy Changelog
 
-## [NEXT]
+## [0.5.0] - 2026-03-24
+
+### Added
+- Right-align numeric columns (JSON `Number` type auto-detected)
 
 ### Fixed
 - Config file now found via `$XDG_CONFIG_HOME` / `~/.config` on all platforms
