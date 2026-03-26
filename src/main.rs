@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::env;
-use std::io::{self, Read};
+use std::io::{self, IsTerminal, Read};
 use std::path::PathBuf;
 use unicode_width::UnicodeWidthStr;
 
@@ -105,13 +105,18 @@ const ASCII_CHARS: TableChars = TableChars {
     cross: "+",
 };
 
+fn no_color() -> bool {
+    env::var_os("NO_COLOR").is_some()
+}
+
 fn main() {
     let args = Args::parse();
     let config = Config::load();
 
-    // CLI flags override config
+    // CLI flags override config; suppress ANSI when NO_COLOR is set or stdout is not a tty
     let ascii = args.ascii || config.ascii;
-    let stripe = args.stripe || config.stripe;
+    let allow_ansi = !no_color() && io::stdout().is_terminal();
+    let stripe = (args.stripe || config.stripe) && allow_ansi;
 
     let input = match &args.file {
         Some(path) => std::fs::read_to_string(path).expect("Failed to read file"),
@@ -215,7 +220,7 @@ fn render_table(rows: &[Value], ascii: bool, stripe: bool) -> String {
     let mut widths: Vec<usize> = columns.iter().map(|c| UnicodeWidthStr::width(c.as_str())).collect();
     for row in &table_data {
         for (i, cell) in row.iter().enumerate() {
-            widths[i] = widths[i].max(UnicodeWidthStr::width(cell.as_str()));
+            widths[i] = widths[i].max(display_width(cell));
         }
     }
 
@@ -230,6 +235,24 @@ fn render_table(rows: &[Value], ascii: bool, stripe: bool) -> String {
     }
     output.push_str(&render_bottom_border(&widths, chars));
     output
+}
+
+/// Returns the display width of a string, ignoring ANSI escape sequences.
+fn display_width(s: &str) -> usize {
+    let mut width = 0;
+    let mut in_escape = false;
+    for c in s.chars() {
+        if in_escape {
+            if c.is_ascii_alphabetic() {
+                in_escape = false;
+            }
+        } else if c == '\x1b' {
+            in_escape = true;
+        } else {
+            width += unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+        }
+    }
+    width
 }
 
 fn format_value(v: &Value) -> String {
@@ -297,7 +320,7 @@ fn render_row(cells: &[String], widths: &[usize], numeric: &[bool], chars: &Tabl
 
     s.push_str(chars.vertical);
     for (i, cell) in cells.iter().enumerate() {
-        let cell_width = UnicodeWidthStr::width(cell.as_str());
+        let cell_width = display_width(cell);
         let padding = widths[i] - cell_width;
         let right_align = numeric[i] && !is_header;
 
@@ -468,6 +491,17 @@ mod tests {
             ];
             assert_snapshot!(render_table(&rows, false, false));
         }
+
+        #[test]
+        fn ansi_colored_values() {
+            let green = "\x1b[32m●\x1b[0m";
+            let red = "\x1b[31m●\x1b[0m";
+            let rows: Vec<Value> = vec![
+                serde_json::json!({"status": green, "name": "api-server"}),
+                serde_json::json!({"status": red, "name": "db-worker"}),
+            ];
+            assert_snapshot!(render_table(&rows, true, false));
+        }
     }
 
     mod config {
@@ -510,6 +544,30 @@ mod tests {
             let config: Config = serde_json::from_str(r#"{"ascii": true}"#).unwrap();
             assert!(config.ascii);
             assert!(!config.stripe);
+        }
+    }
+
+    mod no_color {
+        use super::*;
+
+        #[test]
+        fn returns_true_when_set() {
+            unsafe { env::set_var("NO_COLOR", "1") };
+            assert!(no_color());
+            unsafe { env::remove_var("NO_COLOR") };
+        }
+
+        #[test]
+        fn returns_true_when_empty() {
+            unsafe { env::set_var("NO_COLOR", "") };
+            assert!(no_color());
+            unsafe { env::remove_var("NO_COLOR") };
+        }
+
+        #[test]
+        fn returns_false_when_unset() {
+            unsafe { env::remove_var("NO_COLOR") };
+            assert!(!no_color());
         }
     }
 }

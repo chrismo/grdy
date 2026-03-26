@@ -1,0 +1,10 @@
+---
+source: src/main.rs
+expression: "render_table(&rows, true, false)"
+---
++--------+------------+
+| status | name       |
++--------+------------+
+| [32m●[0m      | api-server |
+| [31m●[0m      | db-worker  |
++--------+------------+

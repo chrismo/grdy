@@ -1,5 +1,12 @@
 # Griddy Changelog
 
+## [0.6.0] - 2026-03-26
+
+### Added
+- `NO_COLOR` environment variable support (suppresses ANSI formatting)
+- Automatic tty detection (ANSI formatting suppressed when stdout is piped)
+- ANSI-aware column width calculation (input containing escape codes no longer inflates column widths)
+
 ## [0.5.0] - 2026-03-24
 
 ### Added
