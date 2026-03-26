@@ -26,7 +26,7 @@ export PATH="$HOME/.local/bin:$PATH"
 To install a specific version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/chrismo/grdy/main/install.sh | bash -s v0.4.0
+curl -fsSL https://raw.githubusercontent.com/chrismo/grdy/main/install.sh | bash -s v0.6.0
 ```
 
 ## Usage
