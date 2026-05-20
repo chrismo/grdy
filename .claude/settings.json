@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo build:*)",
+      "Bash(cargo insta accept:*)",
+      "Bash(cargo run:*)",
+      "Bash(cargo test:*)",
+      "Bash(gh issue:*)",
+      "Bash(gh release:*)",
+      "Bash(gh run list:*)",
+      "Bash(gh run view:*)",
+      "mcp__superdb__super_complete",
+      "mcp__superdb__super_recipes",
+      "WebFetch(domain:superdb.org)"
+    ]
+  }
+}
