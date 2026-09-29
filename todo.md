@@ -8,14 +8,13 @@ Binary name: `grdy`
 
 Consider renaming to **jaat** - "JSON as a Table". More descriptive, easier to type than `grdy`.
 
-## Distribution
-
-- Homebrew tap/formula
-
 ## Future Features
 
-- Right-align numbers (JSON `Number` type)
 - Reserved metadata key (`_grdy`) for per-invocation formatting hints (e.g. column alignment, hide columns)
 - Max column width / truncation with `…`
 - Colored values (nulls dim, booleans highlighted)
-- Auto-detect if piped vs TTY (disable styling when piped)
+
+## Maintenance
+
+- Bump GitHub Actions off Node 20 (`actions/checkout@v4`, `actions/upload-artifact@v4`)
+- Check release builds on Ubuntu 26 (`ubuntu-latest` migrates starting 2026-10-19)
