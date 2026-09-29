@@ -1,0 +1,7 @@
+---
+source: src/main.rs
+expression: "render_table(&rows, Style::Plain, true, false)"
+---
+[1mname[0m   [1mage[0m
+Alice   30
+[2mBob     25[0m

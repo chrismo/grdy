@@ -20,6 +20,14 @@ struct Args {
     /// Dim alternate rows for readability
     #[arg(short, long)]
     stripe: bool,
+
+    /// Aligned columns only, no borders or lines
+    #[arg(short, long)]
+    plain: bool,
+
+    /// Hide the header row
+    #[arg(short = 'H', long)]
+    no_header: bool,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -28,6 +36,10 @@ struct Config {
     ascii: bool,
     #[serde(default)]
     stripe: bool,
+    #[serde(default)]
+    plain: bool,
+    #[serde(default)]
+    no_header: bool,
 }
 
 impl Config {
@@ -61,6 +73,13 @@ impl Config {
         // Return XDG path as the preferred default even if nothing exists yet
         xdg_path
     }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Style {
+    Unicode,
+    Ascii,
+    Plain,
 }
 
 struct TableChars {
@@ -114,8 +133,15 @@ fn main() {
     let config = Config::load();
 
     // CLI flags override config; suppress ANSI when NO_COLOR is set or stdout is not a tty
-    let ascii = args.ascii || config.ascii;
+    let style = if args.plain || config.plain {
+        Style::Plain
+    } else if args.ascii || config.ascii {
+        Style::Ascii
+    } else {
+        Style::Unicode
+    };
     let allow_ansi = !no_color() && io::stdout().is_terminal();
+    let no_header = args.no_header || config.no_header;
     let stripe = (args.stripe || config.stripe) && allow_ansi;
 
     let input = match &args.file {
@@ -128,7 +154,7 @@ fn main() {
     };
 
     let rows = parse_json(&input);
-    let output = render_table(&rows, ascii, stripe);
+    let output = render_table(&rows, style, stripe, no_header);
     print!("{}", output);
 }
 
@@ -167,7 +193,7 @@ fn parse_json(input: &str) -> Vec<Value> {
     rows
 }
 
-fn render_table(rows: &[Value], ascii: bool, stripe: bool) -> String {
+fn render_table(rows: &[Value], style: Style, stripe: bool, no_header: bool) -> String {
     if rows.is_empty() {
         return String::new();
     }
@@ -217,23 +243,39 @@ fn render_table(rows: &[Value], ascii: bool, stripe: bool) -> String {
     }
 
     // Calculate column widths
-    let mut widths: Vec<usize> = columns.iter().map(|c| UnicodeWidthStr::width(c.as_str())).collect();
+    let mut widths: Vec<usize> = if no_header {
+        vec![0; columns.len()]
+    } else {
+        columns.iter().map(|c| UnicodeWidthStr::width(c.as_str())).collect()
+    };
     for row in &table_data {
         for (i, cell) in row.iter().enumerate() {
             widths[i] = widths[i].max(display_width(cell));
         }
     }
 
-    let chars = if ascii { &ASCII_CHARS } else { &UNICODE_CHARS };
+    let chars = match style {
+        Style::Unicode => Some(&UNICODE_CHARS),
+        Style::Ascii => Some(&ASCII_CHARS),
+        Style::Plain => None,
+    };
 
     let mut output = String::new();
-    output.push_str(&render_top_border(&widths, chars));
-    output.push_str(&render_row(&columns, &widths, &numeric, chars, stripe, None));
-    output.push_str(&render_separator(&widths, chars));
+    if let Some(chars) = chars {
+        output.push_str(&render_top_border(&widths, chars));
+    }
+    if !no_header {
+        output.push_str(&render_row(&columns, &widths, &numeric, chars, stripe, None));
+        if let Some(chars) = chars {
+            output.push_str(&render_separator(&widths, chars));
+        }
+    }
     for (i, row) in table_data.iter().enumerate() {
         output.push_str(&render_row(row, &widths, &numeric, chars, stripe, Some(i)));
     }
-    output.push_str(&render_bottom_border(&widths, chars));
+    if let Some(chars) = chars {
+        output.push_str(&render_bottom_border(&widths, chars));
+    }
     output
 }
 
@@ -308,9 +350,24 @@ fn render_separator(widths: &[usize], chars: &TableChars) -> String {
     s
 }
 
-fn render_row(cells: &[String], widths: &[usize], numeric: &[bool], chars: &TableChars, stripe: bool, row_index: Option<usize>) -> String {
+fn render_row(cells: &[String], widths: &[usize], numeric: &[bool], chars: Option<&TableChars>, stripe: bool, row_index: Option<usize>) -> String {
     let is_header = row_index.is_none();
     let dim = stripe && row_index.is_some_and(|i| i % 2 == 1);
+
+    let padded: Vec<String> = cells
+        .iter()
+        .enumerate()
+        .map(|(i, cell)| {
+            let padding = " ".repeat(widths[i] - display_width(cell));
+            if is_header && stripe {
+                format!("\x1b[1m{}\x1b[0m{}", cell, padding)
+            } else if numeric[i] && !is_header {
+                format!("{}{}", padding, cell)
+            } else {
+                format!("{}{}", cell, padding)
+            }
+        })
+        .collect();
 
     let mut s = String::new();
 
@@ -318,20 +375,16 @@ fn render_row(cells: &[String], widths: &[usize], numeric: &[bool], chars: &Tabl
         s.push_str("\x1b[2m");
     }
 
-    s.push_str(chars.vertical);
-    for (i, cell) in cells.iter().enumerate() {
-        let cell_width = display_width(cell);
-        let padding = widths[i] - cell_width;
-        let right_align = numeric[i] && !is_header;
-
-        if is_header && stripe {
-            s.push_str(&format!(" \x1b[1m{}\x1b[0m{} ", cell, " ".repeat(padding)));
-        } else if right_align {
-            s.push_str(&format!(" {}{} ", " ".repeat(padding), cell));
-        } else {
-            s.push_str(&format!(" {}{} ", cell, " ".repeat(padding)));
+    match chars {
+        Some(chars) => {
+            s.push_str(chars.vertical);
+            for cell in &padded {
+                s.push_str(&format!(" {} ", cell));
+                s.push_str(chars.vertical);
+            }
         }
-        s.push_str(chars.vertical);
+        // Plain: two-space gutter, no trailing whitespace
+        None => s.push_str(padded.join("  ").trim_end()),
     }
 
     if dim {
@@ -428,19 +481,19 @@ mod tests {
         #[test]
         fn empty_input() {
             let rows: Vec<Value> = vec![];
-            assert_eq!(render_table(&rows, false, false), "");
+            assert_eq!(render_table(&rows, Style::Unicode, false, false), "");
         }
 
         #[test]
         fn single_row() {
             let rows: Vec<Value> = vec![serde_json::json!({"name": "Alice", "age": 30})];
-            assert_snapshot!(render_table(&rows, false, false));
+            assert_snapshot!(render_table(&rows, Style::Unicode, false, false));
         }
 
         #[test]
         fn single_row_ascii() {
             let rows: Vec<Value> = vec![serde_json::json!({"name": "Alice", "age": 30})];
-            assert_snapshot!(render_table(&rows, true, false));
+            assert_snapshot!(render_table(&rows, Style::Ascii, false, false));
         }
 
         #[test]
@@ -450,7 +503,7 @@ mod tests {
                 serde_json::json!({"name": "Bob", "age": 25}),
                 serde_json::json!({"name": "Charlie", "age": 35}),
             ];
-            assert_snapshot!(render_table(&rows, false, false));
+            assert_snapshot!(render_table(&rows, Style::Unicode, false, false));
         }
 
         #[test]
@@ -461,7 +514,7 @@ mod tests {
                 serde_json::json!({"name": "Charlie", "age": 35}),
                 serde_json::json!({"name": "Diana", "age": 28}),
             ];
-            assert_snapshot!(render_table(&rows, false, true));
+            assert_snapshot!(render_table(&rows, Style::Unicode, true, false));
         }
 
         #[test]
@@ -471,17 +524,59 @@ mod tests {
                 serde_json::json!({"b": 2}),
                 serde_json::json!({"a": 3, "b": 4}),
             ];
-            assert_snapshot!(render_table(&rows, false, false));
+            assert_snapshot!(render_table(&rows, Style::Unicode, false, false));
         }
 
         #[test]
         fn preserves_key_order() {
             // Keys are in non-alphabetical order in the JSON; columns should match input order
             let rows = parse_json(r#"[{"zebra": 1, "apple": 2, "mango": 3}]"#);
-            let output = render_table(&rows, true, false);
+            let output = render_table(&rows, Style::Ascii, false, false);
             let header_line = output.lines().nth(1).unwrap();
             let headers: Vec<&str> = header_line.split('|').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
             assert_eq!(headers, vec!["zebra", "apple", "mango"]);
+        }
+
+        #[test]
+        fn multiple_rows_plain() {
+            let rows: Vec<Value> = vec![
+                serde_json::json!({"name": "Alice", "age": 30, "city": "Austin"}),
+                serde_json::json!({"name": "Bob", "age": 5, "city": "NYC"}),
+            ];
+            assert_eq!(
+                render_table(&rows, Style::Plain, false, false),
+                "name   age  city\nAlice   30  Austin\nBob      5  NYC\n"
+            );
+        }
+
+        #[test]
+        fn multiple_rows_plain_with_stripe() {
+            let rows: Vec<Value> = vec![
+                serde_json::json!({"name": "Alice", "age": 30}),
+                serde_json::json!({"name": "Bob", "age": 25}),
+            ];
+            assert_snapshot!(render_table(&rows, Style::Plain, true, false));
+        }
+
+        #[test]
+        fn no_header() {
+            let rows: Vec<Value> = vec![
+                serde_json::json!({"name": "Alice", "age": 30}),
+                serde_json::json!({"name": "Bob", "age": 5}),
+            ];
+            assert_eq!(
+                render_table(&rows, Style::Unicode, false, true),
+                "╭───────┬────╮\n│ Alice │ 30 │\n│ Bob   │  5 │\n╰───────┴────╯\n"
+            );
+        }
+
+        #[test]
+        fn no_header_plain() {
+            let rows: Vec<Value> = vec![
+                serde_json::json!({"name": "Alice", "age": 30}),
+                serde_json::json!({"name": "Bob", "age": 5}),
+            ];
+            assert_eq!(render_table(&rows, Style::Plain, false, true), "Alice  30\nBob     5\n");
         }
 
         #[test]
@@ -489,7 +584,7 @@ mod tests {
             let rows: Vec<Value> = vec![
                 serde_json::json!({"data": [1, 2, 3], "meta": {"x": 1}}),
             ];
-            assert_snapshot!(render_table(&rows, false, false));
+            assert_snapshot!(render_table(&rows, Style::Unicode, false, false));
         }
 
         #[test]
@@ -500,7 +595,7 @@ mod tests {
                 serde_json::json!({"status": green, "name": "api-server"}),
                 serde_json::json!({"status": red, "name": "db-worker"}),
             ];
-            assert_snapshot!(render_table(&rows, true, false));
+            assert_snapshot!(render_table(&rows, Style::Ascii, false, false));
         }
     }
 

@@ -59,6 +59,13 @@ With `--ascii`:
 +-------+-----+
 ```
 
+With `--plain`:
+```
+name   age
+Alice   30
+Bob     25
+```
+
 Handles sparse keys, nested structures, and mixed types:
 ```bash
 echo '[
@@ -81,6 +88,8 @@ echo '[
 
 - `-a, --ascii` - Use ASCII instead of Unicode box-drawing
 - `-s, --stripe` - Dim alternate rows for readability
+- `-p, --plain` - Aligned columns only, no borders or lines
+- `-H, --no-header` - Hide the header row
 
 ### Input formats
 
@@ -97,7 +106,9 @@ Create `~/.config/grdy/config.json` (or `$XDG_CONFIG_HOME/grdy/config.json`) to 
 ```json
 {
   "ascii": false,
-  "stripe": false
+  "stripe": false,
+  "plain": false,
+  "no_header": false
 }
 ```
 

@@ -1,5 +1,11 @@
 # Griddy Changelog
 
+## [0.7.0] - 2026-09-29
+
+### Added
+- `-p, --plain` option: aligned columns with no borders or lines
+- `-H, --no-header` option: hide the header row (works with any style)
+
 ## [0.6.0] - 2026-03-26
 
 ### Added
