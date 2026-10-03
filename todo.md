@@ -16,5 +16,4 @@ Consider renaming to **jaat** - "JSON as a Table". More descriptive, easier to t
 
 ## Maintenance
 
-- Bump GitHub Actions off Node 20 (`actions/checkout@v4`, `actions/upload-artifact@v4`)
 - Check release builds on Ubuntu 26 (`ubuntu-latest` migrates starting 2026-10-19)
