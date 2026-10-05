@@ -1,9 +1,9 @@
 ---
 source: src/main.rs
-expression: "render_table(&rows, false, false)"
+expression: "render_table(&rows, Style::Unicode, false, false)"
 ---
-╭───────────┬──────────╮
-│ data      │ meta     │
-├───────────┼──────────┤
-│ [3 items] │ {1 keys} │
-╰───────────┴──────────╯
+╭───────────┬─────────╮
+│ data      │ meta    │
+├───────────┼─────────┤
+│ [3 items] │ {1 key} │
+╰───────────┴─────────╯

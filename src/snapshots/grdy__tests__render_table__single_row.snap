@@ -1,6 +1,6 @@
 ---
 source: src/main.rs
-expression: "render_table(&rows, false, false)"
+expression: "render_table(&rows, Style::Unicode, false, false)"
 ---
 ╭───────┬─────╮
 │ name  │ age │

@@ -1,5 +1,23 @@
 # Griddy Changelog
 
+## [Unreleased]
+
+### Changed
+- Arrays containing non-object values are now an error (previously rendered broken rows)
+- Control characters in string values (newlines, tabs) are shown escaped instead of breaking the table
+- Nested value counts use singular forms (`[1 item]`, `{1 key}`)
+- Columns containing only `null` are no longer right-aligned as numeric
+- Invalid config files now print a warning instead of being silently ignored
+- Releases include static Linux builds (`*-unknown-linux-musl`); `install.sh` prefers them
+
+### Fixed
+- Crash on column names containing multi-codepoint emoji (e.g. ZWJ sequences)
+- Misaligned columns for emoji with variation selectors and OSC 8 hyperlinks
+- Missing files, non-UTF-8 input, and closed pipes (`grdy | head`) now exit cleanly instead of panicking
+- Syntax errors in pretty-printed JSON report the real line and column
+- Empty or relative `$XDG_CONFIG_HOME` is ignored (previously could load `./grdy/config.json`)
+- `install.sh` accepts versions with or without a leading `v`
+
 ## [0.7.0] - 2026-09-29
 
 ### Added

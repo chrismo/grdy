@@ -1,6 +1,6 @@
 ---
 source: src/main.rs
-expression: "render_table(&rows, true, false)"
+expression: "render_table(&rows, Style::Ascii, false, false)"
 ---
 +--------+------------+
 | status | name       |

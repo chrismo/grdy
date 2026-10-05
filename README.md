@@ -44,8 +44,8 @@ Example output:
 ╭───────┬─────╮
 │ name  │ age │
 ├───────┼─────┤
-│ Alice │ 30  │
-│ Bob   │ 25  │
+│ Alice │  30 │
+│ Bob   │  25 │
 ╰───────┴─────╯
 ```
 
@@ -54,8 +54,8 @@ With `--ascii`:
 +-------+-----+
 | name  | age |
 +-------+-----+
-| Alice | 30  |
-| Bob   | 25  |
+| Alice |  30 |
+| Bob   |  25 |
 +-------+-----+
 ```
 
@@ -75,13 +75,13 @@ echo '[
 ]' | grdy
 ```
 ```
-╭─────────┬───────┬────────┬───────────┬──────────┬───────╮
-│ name    │ role  │ active │ tags      │ meta     │ score │
-├─────────┼───────┼────────┼───────────┼──────────┼───────┤
-│ Alice   │ admin │ true   │ [2 items] │          │       │
-│ Bob     │ user  │ false  │           │ {1 keys} │       │
-│ Charlie │       │ true   │           │          │ 92.5  │
-╰─────────┴───────┴────────┴───────────┴──────────┴───────╯
+╭─────────┬───────┬────────┬───────────┬─────────┬───────╮
+│ name    │ role  │ active │ tags      │ meta    │ score │
+├─────────┼───────┼────────┼───────────┼─────────┼───────┤
+│ Alice   │ admin │ true   │ [2 items] │         │       │
+│ Bob     │ user  │ false  │           │ {1 key} │       │
+│ Charlie │       │ true   │           │         │  92.5 │
+╰─────────┴───────┴────────┴───────────┴─────────┴───────╯
 ```
 
 ### Options
@@ -97,7 +97,8 @@ echo '[
 - Single JSON object
 - JSONL (newline-delimited JSON)
 
-Nested arrays display as `[N items]` and nested objects as `{N keys}`.
+Arrays must contain only objects. Nested arrays display as `[N items]` and nested objects as `{N keys}` (singular for 1).
+Numeric columns are right-aligned. Control characters in strings (newlines, tabs) are shown escaped (`\n`, `\t`).
 
 ### Configuration
 
@@ -112,7 +113,7 @@ Create `~/.config/grdy/config.json` (or `$XDG_CONFIG_HOME/grdy/config.json`) to 
 }
 ```
 
-CLI flags override config file settings.
+CLI flags are combined with config file settings: a flag can turn an option on, but can't turn off one the config enables.
 
 ## License
 

@@ -10,6 +10,17 @@ fi
 VERSION="$1"
 TAG="v$VERSION"
 
+if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Error: version must look like 0.1.0 (no leading 'v'), got '$VERSION'" >&2
+    exit 1
+fi
+
+# Refuse before changing anything if the tag is already taken
+if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || git ls-remote --exit-code --tags origin "$TAG" >/dev/null; then
+    echo "Error: tag $TAG already exists" >&2
+    exit 1
+fi
+
 # Ensure we're on main
 BRANCH=$(git branch --show-current)
 if [ "$BRANCH" != "main" ]; then
@@ -28,7 +39,7 @@ if ! git diff-index --quiet HEAD --; then
 fi
 
 # Check changelog
-if ! grep -q "\[$VERSION\]" CHANGELOG.md; then
+if ! grep -qF "[$VERSION]" CHANGELOG.md; then
     echo "Warning: CHANGELOG.md has no entry for $VERSION" >&2
     read -p "Continue anyway? [y/N] " -n 1 -r
     echo
@@ -50,6 +61,9 @@ sed -i '' "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
 
 echo "Updating Cargo.lock..."
 cargo update --workspace --offline --quiet
+
+echo "Running tests..."
+cargo test --locked --quiet
 
 echo "Updating README.md install example..."
 sed -i '' "s/bash -s v[0-9]*\.[0-9]*\.[0-9]*/bash -s v$VERSION/" README.md

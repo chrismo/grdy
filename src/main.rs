@@ -3,8 +3,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::env;
-use std::io::{self, IsTerminal, Read};
-use std::path::PathBuf;
+use std::ffi::{OsStr, OsString};
+use std::io::{self, IsTerminal, Read, Write};
+use std::path::{Path, PathBuf};
 use unicode_width::UnicodeWidthStr;
 
 #[derive(Parser)]
@@ -45,33 +46,49 @@ struct Config {
 impl Config {
     fn load() -> Self {
         Self::config_path()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .and_then(|s| serde_json::from_str(&s).ok())
+            .map(|p| Self::load_from(&p))
             .unwrap_or_default()
     }
 
+    /// Missing file means defaults; an unreadable or invalid file warns and uses defaults.
+    fn load_from(path: &Path) -> Self {
+        let result = match std::fs::read_to_string(path) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Self::default(),
+            Err(e) => Err(e.to_string()),
+            Ok(s) => serde_json::from_str(&s).map_err(|e| e.to_string()),
+        };
+        result.unwrap_or_else(|e| {
+            eprintln!("grdy: ignoring config {}: {}", path.display(), e);
+            Self::default()
+        })
+    }
+
     fn config_path() -> Option<PathBuf> {
-        // Check XDG_CONFIG_HOME first, then fall back to dirs::config_dir()
-        let xdg = env::var("XDG_CONFIG_HOME").ok().map(PathBuf::from);
-        let base = xdg.or_else(|| dirs::home_dir().map(|h| h.join(".config")));
-        let xdg_path = base.map(|d| d.join("grdy").join("config.json"));
+        Self::resolve_path(
+            env::var_os("XDG_CONFIG_HOME"),
+            dirs::home_dir(),
+            dirs::config_dir(),
+        )
+    }
 
-        if let Some(ref p) = xdg_path {
-            if p.exists() {
-                return xdg_path;
-            }
+    /// Prefers `$XDG_CONFIG_HOME` (or `~/.config`), then the platform config dir
+    /// (e.g. ~/Library/Application Support on macOS) if a config exists there.
+    fn resolve_path(
+        xdg: Option<OsString>,
+        home: Option<PathBuf>,
+        platform: Option<PathBuf>,
+    ) -> Option<PathBuf> {
+        // XDG spec: empty or relative values are ignored
+        let xdg = xdg.map(PathBuf::from).filter(|p| p.is_absolute());
+        let preferred = xdg
+            .or_else(|| home.map(|h| h.join(".config")))
+            .map(|d| d.join("grdy").join("config.json"));
+        let fallback = platform.map(|d| d.join("grdy").join("config.json"));
+
+        if preferred.as_ref().is_some_and(|p| p.exists()) {
+            return preferred;
         }
-
-        // Fall back to platform default (e.g. ~/Library/Application Support on macOS)
-        let platform_path = dirs::config_dir().map(|d| d.join("grdy").join("config.json"));
-        if let Some(ref p) = platform_path {
-            if p.exists() {
-                return platform_path;
-            }
-        }
-
-        // Return XDG path as the preferred default even if nothing exists yet
-        xdg_path
+        fallback.filter(|p| p.exists()).or(preferred)
     }
 }
 
@@ -124,11 +141,18 @@ const ASCII_CHARS: TableChars = TableChars {
     cross: "+",
 };
 
-fn no_color() -> bool {
-    env::var_os("NO_COLOR").is_some()
+fn no_color(value: Option<&OsStr>) -> bool {
+    value.is_some()
 }
 
 fn main() {
+    if let Err(e) = run() {
+        eprintln!("grdy: {}", e);
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<(), String> {
     let args = Args::parse();
     let config = Config::load();
 
@@ -140,57 +164,81 @@ fn main() {
     } else {
         Style::Unicode
     };
-    let allow_ansi = !no_color() && io::stdout().is_terminal();
+    let allow_ansi = !no_color(env::var_os("NO_COLOR").as_deref()) && io::stdout().is_terminal();
     let no_header = args.no_header || config.no_header;
     let stripe = (args.stripe || config.stripe) && allow_ansi;
 
     let input = match &args.file {
-        Some(path) => std::fs::read_to_string(path).expect("Failed to read file"),
+        Some(path) => std::fs::read_to_string(path).map_err(|e| format!("{}: {}", path, e))?,
         None => {
             let mut buf = String::new();
-            io::stdin().read_to_string(&mut buf).expect("Failed to read stdin");
+            io::stdin()
+                .read_to_string(&mut buf)
+                .map_err(|e| format!("stdin: {}", e))?;
             buf
         }
     };
 
-    let rows = parse_json(&input);
+    let rows = parse_json(&input)?;
     let output = render_table(&rows, style, stripe, no_header);
-    print!("{}", output);
+    match io::stdout().write_all(output.as_bytes()) {
+        // Reader went away (e.g. `grdy | head`); not an error worth reporting
+        Err(e) if e.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+        result => result.map_err(|e| format!("stdout: {}", e)),
+    }
 }
 
-fn parse_json(input: &str) -> Vec<Value> {
+fn parse_json(input: &str) -> Result<Vec<Value>, String> {
     // Try parsing as a single JSON value first
-    if let Ok(value) = serde_json::from_str::<Value>(input) {
-        return match value {
-            Value::Array(arr) => arr,
-            obj @ Value::Object(_) => vec![obj],
-            _ => {
-                eprintln!("Expected JSON array or object");
-                std::process::exit(1);
-            }
-        };
-    }
+    let doc_err = match serde_json::from_str::<Value>(input) {
+        Err(e) => e,
+        Ok(value) => {
+            return match value {
+                Value::Array(arr) => match arr.iter().position(|v| !v.is_object()) {
+                    Some(i) => Err(format!(
+                        "Expected JSON objects in array, found non-object at index {}",
+                        i
+                    )),
+                    None => Ok(arr),
+                },
+                obj @ Value::Object(_) => Ok(vec![obj]),
+                _ => Err("Expected JSON array or object".to_string()),
+            };
+        }
+    };
 
     // Try parsing as JSONL (newline-delimited JSON)
     let mut rows = Vec::new();
-    for line in input.lines() {
-        let line = line.trim();
-        if line.is_empty() {
+    for (i, line) in input.lines().enumerate() {
+        if line.trim().is_empty() {
             continue;
         }
         match serde_json::from_str::<Value>(line) {
             Ok(obj @ Value::Object(_)) => rows.push(obj),
             Ok(_) => {
-                eprintln!("Expected JSON objects in JSONL input");
-                std::process::exit(1);
+                return Err(format!(
+                    "Expected JSON objects in JSONL input at line {}",
+                    i + 1
+                ));
             }
+            // Nothing parsed as JSONL yet: it was likely one (pretty-printed) document, so its error is the useful one
+            Err(_) if rows.is_empty() => return Err(format!("Invalid JSON: {}", doc_err)),
             Err(e) => {
-                eprintln!("Invalid JSON: {}", e);
-                std::process::exit(1);
+                // serde reports positions relative to the single line; rewrite them for the whole input
+                let msg = e.to_string();
+                let msg = msg
+                    .rsplit_once(" at line ")
+                    .map_or(msg.as_str(), |(m, _)| m);
+                return Err(format!(
+                    "Invalid JSON: {} at line {} column {}",
+                    msg,
+                    i + 1,
+                    e.column()
+                ));
             }
         }
     }
-    rows
+    Ok(rows)
 }
 
 fn render_table(rows: &[Value], style: Style, stripe: bool, no_header: bool) -> String {
@@ -215,44 +263,39 @@ fn render_table(rows: &[Value], style: Style, stripe: bool, no_header: bool) -> 
         return String::new();
     }
 
-    // Build table data
-    let mut table_data: Vec<Vec<String>> = Vec::new();
-    for row in rows {
-        let mut row_data = Vec::new();
-        if let Value::Object(obj) = row {
-            for col in &columns {
-                let cell = obj.get(col).map(|v| format_value(v)).unwrap_or_default();
-                row_data.push(cell);
-            }
-        }
-        table_data.push(row_data);
-    }
-
-    // Detect which columns are numeric (all non-null, non-missing values are numbers)
-    let mut numeric: Vec<bool> = vec![true; columns.len()];
-    for row in rows {
-        if let Value::Object(obj) = row {
-            for (i, col) in columns.iter().enumerate() {
-                if let Some(v) = obj.get(col) {
-                    if !v.is_number() && !v.is_null() {
-                        numeric[i] = false;
-                    }
-                }
-            }
-        }
-    }
-
-    // Calculate column widths
+    // Build cells, widths, and numeric detection in one pass. A column is numeric
+    // when it has at least one number and every other present value is null.
     let mut widths: Vec<usize> = if no_header {
         vec![0; columns.len()]
     } else {
-        columns.iter().map(|c| UnicodeWidthStr::width(c.as_str())).collect()
+        columns.iter().map(|c| display_width(c)).collect()
     };
-    for row in &table_data {
-        for (i, cell) in row.iter().enumerate() {
-            widths[i] = widths[i].max(display_width(cell));
-        }
+    let mut has_number = vec![false; columns.len()];
+    let mut has_non_number = vec![false; columns.len()];
+    let mut table_data: Vec<Vec<String>> = Vec::with_capacity(rows.len());
+    for row in rows {
+        let row_data: Vec<String> = columns
+            .iter()
+            .enumerate()
+            .map(|(i, col)| {
+                let value = row.get(col);
+                match value {
+                    Some(Value::Number(_)) => has_number[i] = true,
+                    Some(Value::Null) | None => {}
+                    Some(_) => has_non_number[i] = true,
+                }
+                let cell = value.map(format_value).unwrap_or_default();
+                widths[i] = widths[i].max(display_width(&cell));
+                cell
+            })
+            .collect();
+        table_data.push(row_data);
     }
+    let numeric: Vec<bool> = has_number
+        .iter()
+        .zip(&has_non_number)
+        .map(|(n, x)| *n && !x)
+        .collect();
 
     let chars = match style {
         Style::Unicode => Some(&UNICODE_CHARS),
@@ -262,39 +305,81 @@ fn render_table(rows: &[Value], style: Style, stripe: bool, no_header: bool) -> 
 
     let mut output = String::new();
     if let Some(chars) = chars {
-        output.push_str(&render_top_border(&widths, chars));
+        output.push_str(&render_rule(
+            &widths,
+            chars,
+            chars.top_left,
+            chars.top_tee,
+            chars.top_right,
+        ));
     }
     if !no_header {
-        output.push_str(&render_row(&columns, &widths, &numeric, chars, stripe, None));
+        output.push_str(&render_row(
+            &columns, &widths, &numeric, chars, stripe, None,
+        ));
         if let Some(chars) = chars {
-            output.push_str(&render_separator(&widths, chars));
+            output.push_str(&render_rule(
+                &widths,
+                chars,
+                chars.left_tee,
+                chars.cross,
+                chars.right_tee,
+            ));
         }
     }
     for (i, row) in table_data.iter().enumerate() {
         output.push_str(&render_row(row, &widths, &numeric, chars, stripe, Some(i)));
     }
     if let Some(chars) = chars {
-        output.push_str(&render_bottom_border(&widths, chars));
+        output.push_str(&render_rule(
+            &widths,
+            chars,
+            chars.bottom_left,
+            chars.bottom_tee,
+            chars.bottom_right,
+        ));
     }
     output
 }
 
 /// Returns the display width of a string, ignoring ANSI escape sequences.
+/// Width is measured on the whole visible text so emoji sequences (ZWJ, VS16) count correctly.
 fn display_width(s: &str) -> usize {
-    let mut width = 0;
-    let mut in_escape = false;
-    for c in s.chars() {
-        if in_escape {
-            if c.is_ascii_alphabetic() {
-                in_escape = false;
+    UnicodeWidthStr::width(strip_ansi(s).as_str())
+}
+
+/// Removes CSI (`ESC [ ... final`) and OSC (`ESC ] ... BEL|ESC \`) sequences.
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\x1b' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('[') => {
+                for c in chars.by_ref() {
+                    if ('\x40'..='\x7e').contains(&c) {
+                        break;
+                    }
+                }
             }
-        } else if c == '\x1b' {
-            in_escape = true;
-        } else {
-            width += unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+            Some(']') => {
+                while let Some(c) = chars.next() {
+                    if c == '\x07' {
+                        break;
+                    }
+                    if c == '\x1b' && chars.peek() == Some(&'\\') {
+                        chars.next();
+                        break;
+                    }
+                }
+            }
+            _ => {}
         }
     }
-    width
+    out
 }
 
 fn format_value(v: &Value) -> String {
@@ -302,55 +387,50 @@ fn format_value(v: &Value) -> String {
         Value::Null => "null".to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Number(n) => n.to_string(),
-        Value::String(s) => s.clone(),
-        Value::Array(arr) => format!("[{} items]", arr.len()),
-        Value::Object(obj) => format!("{{{} keys}}", obj.len()),
+        Value::String(s) => escape_control_chars(s),
+        Value::Array(arr) => format!("[{}]", plural(arr.len(), "item")),
+        Value::Object(obj) => format!("{{{}}}", plural(obj.len(), "key")),
     }
 }
 
-fn render_top_border(widths: &[usize], chars: &TableChars) -> String {
-    let mut s = String::new();
-    s.push_str(chars.top_left);
-    for (i, w) in widths.iter().enumerate() {
-        s.push_str(&chars.horizontal.repeat(*w + 2));
-        if i < widths.len() - 1 {
-            s.push_str(chars.top_tee);
-        }
+fn plural(n: usize, noun: &str) -> String {
+    if n == 1 {
+        format!("{} {}", n, noun)
+    } else {
+        format!("{} {}s", n, noun)
     }
-    s.push_str(chars.top_right);
-    s.push('\n');
-    s
 }
 
-fn render_bottom_border(widths: &[usize], chars: &TableChars) -> String {
-    let mut s = String::new();
-    s.push_str(chars.bottom_left);
-    for (i, w) in widths.iter().enumerate() {
-        s.push_str(&chars.horizontal.repeat(*w + 2));
-        if i < widths.len() - 1 {
-            s.push_str(chars.bottom_tee);
-        }
-    }
-    s.push_str(chars.bottom_right);
-    s.push('\n');
-    s
+/// Escapes control characters that would break table layout, keeping ESC for ANSI styling.
+fn escape_control_chars(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            if c.is_control() && c != '\x1b' {
+                c.escape_default().to_string()
+            } else {
+                c.to_string()
+            }
+        })
+        .collect()
 }
 
-fn render_separator(widths: &[usize], chars: &TableChars) -> String {
-    let mut s = String::new();
-    s.push_str(chars.left_tee);
-    for (i, w) in widths.iter().enumerate() {
-        s.push_str(&chars.horizontal.repeat(*w + 2));
-        if i < widths.len() - 1 {
-            s.push_str(chars.cross);
-        }
-    }
-    s.push_str(chars.right_tee);
-    s.push('\n');
-    s
+/// Renders a horizontal rule: `left`, then each column's span joined by `mid`, then `right`.
+fn render_rule(widths: &[usize], chars: &TableChars, left: &str, mid: &str, right: &str) -> String {
+    let spans: Vec<String> = widths
+        .iter()
+        .map(|w| chars.horizontal.repeat(w + 2))
+        .collect();
+    format!("{}{}{}\n", left, spans.join(mid), right)
 }
 
-fn render_row(cells: &[String], widths: &[usize], numeric: &[bool], chars: Option<&TableChars>, stripe: bool, row_index: Option<usize>) -> String {
+fn render_row(
+    cells: &[String],
+    widths: &[usize],
+    numeric: &[bool],
+    chars: Option<&TableChars>,
+    stripe: bool,
+    row_index: Option<usize>,
+) -> String {
     let is_header = row_index.is_none();
     let dim = stripe && row_index.is_some_and(|i| i % 2 == 1);
 
@@ -404,29 +484,57 @@ mod tests {
         #[test]
         fn array_of_objects() {
             let input = r#"[{"a": 1}, {"a": 2}]"#;
-            let rows = parse_json(input);
+            let rows = parse_json(input).unwrap();
             assert_eq!(rows.len(), 2);
         }
 
         #[test]
         fn single_object() {
             let input = r#"{"a": 1, "b": 2}"#;
-            let rows = parse_json(input);
+            let rows = parse_json(input).unwrap();
             assert_eq!(rows.len(), 1);
         }
 
         #[test]
         fn jsonl() {
             let input = "{\"a\": 1}\n{\"a\": 2}\n{\"a\": 3}";
-            let rows = parse_json(input);
+            let rows = parse_json(input).unwrap();
             assert_eq!(rows.len(), 3);
         }
 
         #[test]
         fn jsonl_with_blank_lines() {
             let input = "{\"a\": 1}\n\n{\"a\": 2}\n";
-            let rows = parse_json(input);
+            let rows = parse_json(input).unwrap();
             assert_eq!(rows.len(), 2);
+        }
+
+        #[test]
+        fn empty_array() {
+            assert_eq!(parse_json("[]").unwrap().len(), 0);
+        }
+
+        #[test]
+        fn array_with_non_object_is_an_error() {
+            let err = parse_json(r#"[{"a": 1}, 5]"#).unwrap_err();
+            assert!(err.contains("index 1"), "{}", err);
+        }
+
+        #[test]
+        fn pretty_printed_syntax_error_reports_real_location() {
+            let err = parse_json("[\n  {\"a\": 1},\n]\n").unwrap_err();
+            assert!(err.contains("line 3"), "{}", err);
+        }
+
+        #[test]
+        fn jsonl_syntax_error_reports_line_number() {
+            let err = parse_json("{\"a\": 1}\n{\"a\": 2}\n{\"a\": }\n").unwrap_err();
+            assert!(err.contains("line 3"), "{}", err);
+        }
+
+        #[test]
+        fn array_of_scalars_is_an_error() {
+            assert!(parse_json("[1, 2, 3]").is_err());
         }
     }
 
@@ -455,12 +563,28 @@ mod tests {
 
         #[test]
         fn number_float() {
-            assert_eq!(format_value(&serde_json::json!(3.14)), "3.14");
+            assert_eq!(format_value(&serde_json::json!(2.5)), "2.5");
         }
 
         #[test]
         fn string() {
             assert_eq!(format_value(&serde_json::json!("hello")), "hello");
+        }
+
+        #[test]
+        fn string_control_chars_escaped() {
+            assert_eq!(
+                format_value(&serde_json::json!("a\nb\tc\rd\u{1}")),
+                r"a\nb\tc\rd\u{1}"
+            );
+        }
+
+        #[test]
+        fn string_ansi_escape_preserved() {
+            assert_eq!(
+                format_value(&serde_json::json!("\x1b[31mred\x1b[0m")),
+                "\x1b[31mred\x1b[0m"
+            );
         }
 
         #[test]
@@ -470,13 +594,92 @@ mod tests {
 
         #[test]
         fn object() {
-            assert_eq!(format_value(&serde_json::json!({"a": 1, "b": 2})), "{2 keys}");
+            assert_eq!(
+                format_value(&serde_json::json!({"a": 1, "b": 2})),
+                "{2 keys}"
+            );
+        }
+
+        #[test]
+        fn singular_counts() {
+            assert_eq!(format_value(&serde_json::json!([1])), "[1 item]");
+            assert_eq!(format_value(&serde_json::json!({"a": 1})), "{1 key}");
+        }
+    }
+
+    mod display_width {
+        use super::*;
+
+        #[test]
+        fn plain_ascii() {
+            assert_eq!(display_width("hello"), 5);
+        }
+
+        #[test]
+        fn ignores_csi_sequences() {
+            assert_eq!(display_width("\x1b[31mred\x1b[0m"), 3);
+        }
+
+        #[test]
+        fn ignores_osc_hyperlinks() {
+            assert_eq!(
+                display_width("\x1b]8;;http://x.io\x1b\\click\x1b]8;;\x1b\\"),
+                5
+            );
+            assert_eq!(display_width("\x1b]8;;http://x.io\x07click\x1b]8;;\x07"), 5);
+        }
+
+        #[test]
+        fn emoji_with_variation_selector() {
+            assert_eq!(display_width("❤️"), 2);
+        }
+
+        #[test]
+        fn zwj_emoji_sequence() {
+            assert_eq!(display_width("👨‍👩‍👧"), 2);
         }
     }
 
     mod render_table {
         use super::*;
         use insta::assert_snapshot;
+
+        fn assert_aligned(output: &str) {
+            let widths: Vec<usize> = output.lines().map(display_width).collect();
+            assert!(
+                widths.windows(2).all(|w| w[0] == w[1]),
+                "misaligned: {:?}\n{}",
+                widths,
+                output
+            );
+        }
+
+        #[test]
+        fn all_null_column_is_not_numeric() {
+            let rows: Vec<Value> = vec![
+                serde_json::json!({"value": null}),
+                serde_json::json!({"value": null}),
+            ];
+            assert_eq!(
+                render_table(&rows, Style::Plain, false, false),
+                "value\nnull\nnull\n"
+            );
+        }
+
+        #[test]
+        fn zwj_emoji_header() {
+            let rows: Vec<Value> = vec![serde_json::json!({"👨‍👩‍👧": 1})];
+            assert_aligned(&render_table(&rows, Style::Unicode, false, false));
+        }
+
+        #[test]
+        fn emoji_cells() {
+            let rows: Vec<Value> = vec![
+                serde_json::json!({"a": "❤️", "b": 1}),
+                serde_json::json!({"a": "xx", "b": 2}),
+            ];
+            assert_aligned(&render_table(&rows, Style::Unicode, false, false));
+        }
 
         #[test]
         fn empty_input() {
@@ -530,10 +733,14 @@ mod tests {
         #[test]
         fn preserves_key_order() {
             // Keys are in non-alphabetical order in the JSON; columns should match input order
-            let rows = parse_json(r#"[{"zebra": 1, "apple": 2, "mango": 3}]"#);
+            let rows = parse_json(r#"[{"zebra": 1, "apple": 2, "mango": 3}]"#).unwrap();
             let output = render_table(&rows, Style::Ascii, false, false);
             let header_line = output.lines().nth(1).unwrap();
-            let headers: Vec<&str> = header_line.split('|').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+            let headers: Vec<&str> = header_line
+                .split('|')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect();
             assert_eq!(headers, vec!["zebra", "apple", "mango"]);
         }
 
@@ -576,14 +783,15 @@ mod tests {
                 serde_json::json!({"name": "Alice", "age": 30}),
                 serde_json::json!({"name": "Bob", "age": 5}),
             ];
-            assert_eq!(render_table(&rows, Style::Plain, false, true), "Alice  30\nBob     5\n");
+            assert_eq!(
+                render_table(&rows, Style::Plain, false, true),
+                "Alice  30\nBob     5\n"
+            );
         }
 
         #[test]
         fn nested_values() {
-            let rows: Vec<Value> = vec![
-                serde_json::json!({"data": [1, 2, 3], "meta": {"x": 1}}),
-            ];
+            let rows: Vec<Value> = vec![serde_json::json!({"data": [1, 2, 3], "meta": {"x": 1}})];
             assert_snapshot!(render_table(&rows, Style::Unicode, false, false));
         }
 
@@ -603,35 +811,85 @@ mod tests {
         use super::*;
         use std::fs;
 
-        #[test]
-        fn loads_from_xdg_config_home() {
-            let tmp = tempfile::tempdir().unwrap();
-            let config_dir = tmp.path().join("grdy");
-            fs::create_dir_all(&config_dir).unwrap();
-            let config_file = config_dir.join("config.json");
-            fs::write(&config_file, r#"{"ascii": true, "stripe": true}"#).unwrap();
-
-            // SAFETY: test is single-threaded; no other threads reading this env var
-            unsafe { env::set_var("XDG_CONFIG_HOME", tmp.path()) };
-            let path = Config::config_path().unwrap();
-            assert_eq!(path, config_file);
-
-            let config: Config =
-                serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-            assert!(config.ascii);
-            assert!(config.stripe);
-            unsafe { env::remove_var("XDG_CONFIG_HOME") };
+        fn write_config(dir: &std::path::Path, body: &str) -> PathBuf {
+            let path = dir.join("grdy").join("config.json");
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, body).unwrap();
+            path
         }
 
         #[test]
-        fn missing_file_returns_defaults() {
+        fn prefers_xdg_config_home() {
+            let xdg = tempfile::tempdir().unwrap();
+            let platform = tempfile::tempdir().unwrap();
+            let expected = write_config(xdg.path(), "{}");
+            write_config(platform.path(), "{}");
+            let path =
+                Config::resolve_path(Some(xdg.path().into()), None, Some(platform.path().into()));
+            assert_eq!(path, Some(expected));
+        }
+
+        #[test]
+        fn ignores_empty_xdg_config_home() {
+            let home = tempfile::tempdir().unwrap();
+            let path = Config::resolve_path(Some("".into()), Some(home.path().into()), None);
+            assert_eq!(
+                path,
+                Some(home.path().join(".config").join("grdy").join("config.json"))
+            );
+        }
+
+        #[test]
+        fn ignores_relative_xdg_config_home() {
+            let home = tempfile::tempdir().unwrap();
+            let path = Config::resolve_path(Some("rel".into()), Some(home.path().into()), None);
+            assert_eq!(
+                path,
+                Some(home.path().join(".config").join("grdy").join("config.json"))
+            );
+        }
+
+        #[test]
+        fn falls_back_to_platform_dir_when_it_exists() {
+            let xdg = tempfile::tempdir().unwrap();
+            let platform = tempfile::tempdir().unwrap();
+            let expected = write_config(platform.path(), "{}");
+            let path =
+                Config::resolve_path(Some(xdg.path().into()), None, Some(platform.path().into()));
+            assert_eq!(path, Some(expected));
+        }
+
+        #[test]
+        fn defaults_to_xdg_path_when_nothing_exists() {
+            let xdg = tempfile::tempdir().unwrap();
+            let platform = tempfile::tempdir().unwrap();
+            let path =
+                Config::resolve_path(Some(xdg.path().into()), None, Some(platform.path().into()));
+            assert_eq!(path, Some(xdg.path().join("grdy").join("config.json")));
+        }
+
+        #[test]
+        fn load_from_reads_settings() {
             let tmp = tempfile::tempdir().unwrap();
-            // Point XDG at an empty dir with no config file
-            unsafe { env::set_var("XDG_CONFIG_HOME", tmp.path()) };
-            let config = Config::load();
+            let path = write_config(tmp.path(), r#"{"ascii": true, "stripe": true}"#);
+            let config = Config::load_from(&path);
+            assert!(config.ascii);
+            assert!(config.stripe);
+        }
+
+        #[test]
+        fn load_from_missing_file_returns_defaults() {
+            let tmp = tempfile::tempdir().unwrap();
+            let config = Config::load_from(&tmp.path().join("nope.json"));
             assert!(!config.ascii);
             assert!(!config.stripe);
-            unsafe { env::remove_var("XDG_CONFIG_HOME") };
+        }
+
+        #[test]
+        fn load_from_invalid_file_returns_defaults() {
+            let tmp = tempfile::tempdir().unwrap();
+            let path = write_config(tmp.path(), r#"{"ascii": tru}"#);
+            assert!(!Config::load_from(&path).ascii);
         }
 
         #[test]
@@ -644,25 +902,19 @@ mod tests {
 
     mod no_color {
         use super::*;
-
         #[test]
         fn returns_true_when_set() {
-            unsafe { env::set_var("NO_COLOR", "1") };
-            assert!(no_color());
-            unsafe { env::remove_var("NO_COLOR") };
+            assert!(no_color(Some(OsStr::new("1"))));
         }
 
         #[test]
         fn returns_true_when_empty() {
-            unsafe { env::set_var("NO_COLOR", "") };
-            assert!(no_color());
-            unsafe { env::remove_var("NO_COLOR") };
+            assert!(no_color(Some(OsStr::new(""))));
         }
 
         #[test]
         fn returns_false_when_unset() {
-            unsafe { env::remove_var("NO_COLOR") };
-            assert!(!no_color());
+            assert!(!no_color(None));
         }
     }
 }
