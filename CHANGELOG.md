@@ -1,6 +1,6 @@
 # Griddy Changelog
 
-## [Unreleased]
+## [0.8.0] - 2026-10-10
 
 ### Changed
 - Arrays containing non-object values are now an error (previously rendered broken rows)
